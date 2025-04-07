@@ -45,3 +45,24 @@ void Agent::onFill(const Fill& fill) {
         }
     }
 }
+
+double Agent::getVWAP() const {
+    if (inventory == 0 || positionQueue.empty()) return 0.0;
+
+    double totalCost = 0.0;
+    int totalQty = 0;
+
+    for (const auto& [qty, price] : positionQueue) {
+        totalCost += qty * price;
+        totalQty += qty;
+    }
+
+    return totalQty > 0 ? totalCost / totalQty : 0.0;
+}
+
+double Agent::getUnrealizedPnL(double marketPrice) const {
+    if (inventory == 0) return 0.0;
+
+    double avgEntry = getVWAP();
+    return (marketPrice - avgEntry) * inventory;
+}

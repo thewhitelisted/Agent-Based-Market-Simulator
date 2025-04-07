@@ -1,22 +1,22 @@
 #pragma once
 
-#include <vector>
-#include <memory>
 #include "core/OrderBook.hpp"
+#include "utils/CsvLogger.hpp"
 #include "agents/Agent.hpp"
+#include <memory>
+#include <vector>
 
 class MarketSimulator {
 public:
-    MarketSimulator();
-
+    MarketSimulator(int steps);
     void addAgent(std::shared_ptr<Agent> agent);
-    void run(int numSteps);
+    void run();
+    void stepSimulation();
 
 private:
+    int timestamp;
+    int maxSteps;
     OrderBook orderBook;
     std::vector<std::shared_ptr<Agent>> agents;
-    long timestamp;
-
-    void stepSimulation();  
-    void logState() const;
+    std::unique_ptr<CsvLogger> logger;
 };

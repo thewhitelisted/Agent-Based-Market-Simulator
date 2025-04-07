@@ -1,50 +1,59 @@
 #include "core/MarketSimulator.hpp"
 #include <iostream>
+#include <memory>
 
-MarketSimulator::MarketSimulator() : timestamp(0) {}
+MarketSimulator::MarketSimulator(int steps)
+    : timestamp(0),
+      maxSteps(steps),
+      logger(std::make_unique<CsvLogger>("logs/simulation.csv")) {}
 
 void MarketSimulator::addAgent(std::shared_ptr<Agent> agent) {
     agents.push_back(agent);
 }
 
-void MarketSimulator::run(int numSteps) {
-    for (int step = 0; step < numSteps; ++step) {
-        std::cout << "\n--- Timestamp: " << timestamp << " ---\n";
-        stepSimulation();
-        logState();
-        ++timestamp;
-    }
-
-    std::cout << "\n=== SIMULATION COMPLETE ===\n";
-}
-
 void MarketSimulator::stepSimulation() {
-    // Step each agent
     for (auto& agent : agents) {
         agent->act(orderBook, timestamp);
     }
 
-    // Collect fills and dispatch to passive agents
-    for (const auto& fill : orderBook.getRecentFills()) {
+    const auto& fills = orderBook.getRecentFills();
+    for (const auto& fill : fills) {
         for (auto& agent : agents) {
             if (agent->getId() == fill.agentId) {
-                agent->onFill(fill); // ✅ Passive fill!
+                agent->onFill(fill);
                 break;
             }
         }
     }
-    orderBook.clearFills(); // reset buffer
-}
 
-void MarketSimulator::logState() const {
+    orderBook.clearFills();
+
+    double marketPrice = orderBook.getMidPrice();
+    logger->log(timestamp, agents, marketPrice); 
+
+    std::cout << "--- Timestamp: " << timestamp << " ---\n";
     orderBook.printBook();
 
-    std::cout << "\n--- Agent Stats ---\n";
     for (const auto& agent : agents) {
+        double realized = agent->getRealizedPnL();
+        double unrealized = agent->getUnrealizedPnL(marketPrice);
         std::cout << "Agent " << agent->getId()
                   << " | Cash: " << agent->getCash()
                   << " | Inventory: " << agent->getInventory()
-                  << " | Realized PnL: " << agent->getRealizedPnL()
-                  << "\n";
+                  << " | Realized PnL: " << realized
+                  << " | Unrealized PnL: " << unrealized
+                  << " | Total PnL: " << (realized + unrealized)
+                  << std::endl;
     }
+
+    std::cout << std::endl;
+    timestamp++;
+}
+
+void MarketSimulator::run() {
+    while (timestamp < maxSteps) {
+        stepSimulation(); 
+    }
+    logger->close();
+    std::cout << "=== SIMULATION COMPLETE ===\n";
 }

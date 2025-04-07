@@ -16,6 +16,8 @@ public:
     double getCash() const;
     int getInventory() const;
     double getRealizedPnL() const;
+    double getUnrealizedPnL(double marketPrice) const;
+    double getVWAP() const; // Volume-weighted average price
 
 protected:
     int id;

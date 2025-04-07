@@ -114,3 +114,13 @@ const std::vector<Fill>& OrderBook::getRecentFills() const {
 void OrderBook::clearFills() {
     recentFills.clear();
 }
+
+
+double OrderBook::getMidPrice() const {
+    if (asks.empty() || bids.empty()) return 0.0;
+
+    double bestAsk = asks.begin()->first;
+    double bestBid = bids.rbegin()->first;
+    return (bestAsk + bestBid) / 2.0;
+}
+

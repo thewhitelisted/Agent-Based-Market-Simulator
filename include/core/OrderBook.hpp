@@ -21,6 +21,7 @@ public:
 
     const std::vector<Fill>& getRecentFills() const;
     void clearFills();
+    double getMidPrice() const;
 
 private:
     std::map<double, std::deque<Order>> bids; // price -> orders (BUY)
