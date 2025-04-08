@@ -1,4 +1,4 @@
-# 🧠 Adversarial Market Simulation
+# 🧠 Agent-Based Market Simulator
 
 A modular, agent-based simulation of a limit order book exchange in C++. Designed for researching adversarial trading behavior, market making, and inventory-sensitive strategies in a competitive environment.
 
@@ -80,8 +80,8 @@ Each run will:
 
 ## 🔮 Future Roadmap
 
-- [ ] Unrealized PnL (mark-to-market)
-- [ ] CSV output / data logging
+- [x] Unrealized PnL (mark-to-market)
+- [x] CSV output / data logging
 - [ ] Visualization support
 - [ ] Order latency modeling
 - [ ] Adversarial & strategic agents

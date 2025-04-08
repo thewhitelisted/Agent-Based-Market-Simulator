@@ -172,8 +172,7 @@ void OrderBook::printBook() const {
                 totalQty += order.quantity;
             }
             std::cout << "  Price: " << std::fixed << std::setprecision(2) << it->first 
-                      << " | Qty: " << totalQty 
-                      << " | Orders: " << it->second.size() << "\n";
+                      << " | Qty: " << totalQty << "\n";
         }
     }
     
@@ -188,8 +187,7 @@ void OrderBook::printBook() const {
                 totalQty += order.quantity;
             }
             std::cout << "  Price: " << std::fixed << std::setprecision(2) << it->first 
-                      << " | Qty: " << totalQty 
-                      << " | Orders: " << it->second.size() << "\n";
+                      << " | Qty: " << totalQty << "\n";
         }
     }
 }
