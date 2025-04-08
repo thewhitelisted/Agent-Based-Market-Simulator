@@ -6,7 +6,7 @@
 int main() {
     std::cout << "Adversarial Market Simulation Starting...\n";
 
-    MarketSimulator sim(25);
+    MarketSimulator sim(50);
     
     // Add agents with initial cash of 10,000 each (as defined in Agent constructor)
     sim.addAgent(std::make_shared<NoiseTrader>(301));

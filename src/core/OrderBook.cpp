@@ -7,20 +7,41 @@ OrderBook::OrderBook()
       actionTakenByAgentId(-1) {}
 
 void OrderBook::addLimitOrder(const Order& order) {
+    int remainingQty = order.quantity;
+    
     // First check if order can be immediately matched
     if (order.side == OrderSide::BUY && !asks.empty() && order.price >= asks.begin()->first) {
         auto fills = matchMarketOrder(order);
-        if (fills.size() > 0) return; // Order was fully filled
+        if (!fills.empty()) {
+            // Track remaining quantity
+            for (const auto& fill : fills) {
+                remainingQty -= fill.quantity;
+            }
+            // If order was fully filled, we're done
+            if (remainingQty == 0) {
+                return;
+            }
+        }
     }
     else if (order.side == OrderSide::SELL && !bids.empty() && order.price <= bids.rbegin()->first) {
         auto fills = matchMarketOrder(order);
-        if (fills.size() > 0) return; // Order was fully filled
+        if (!fills.empty()) {
+            // Track remaining quantity
+            for (const auto& fill : fills) {
+                remainingQty -= fill.quantity;
+            }
+            // If order was fully filled, we're done
+            if (remainingQty == 0) {
+                return;
+            }
+        }
     }
 
     // If we get here, either no matching or partial fill - add remaining to book
     static int nextOrderId = 1;
     Order orderWithId = order;
     orderWithId.id = nextOrderId++;
+    orderWithId.quantity = remainingQty;  // Update with remaining quantity
     
     // Add order to the book
     idLookup[orderWithId.id] = orderWithId;
@@ -31,16 +52,14 @@ void OrderBook::addLimitOrder(const Order& order) {
     actionTakenByAgentId = orderWithId.agentId;
     
     // Create a reservation fill for tracking purposes
-    Fill reservation{
+    recentFills.emplace_back(Fill{
         .agentId = orderWithId.agentId,
         .price = orderWithId.price,
         .quantity = orderWithId.quantity,
         .side = orderWithId.side,
         .timestamp = orderWithId.timestamp,
         .isReservation = true
-    };
-    
-    recentFills.push_back(reservation);
+    });
 }
 
 bool OrderBook::cancelOrder(int orderId) {
@@ -56,7 +75,7 @@ bool OrderBook::cancelOrder(int orderId) {
         for (auto qIt = queue.begin(); qIt != queue.end(); ++qIt) {
             if (qIt->id == orderId) {
                 // Create reservation cancellation fill
-                Fill cancelFill{
+                recentFills.emplace_back(Fill{
                     .agentId = order.agentId,
                     .price = order.price,
                     .quantity = order.quantity,
@@ -64,8 +83,7 @@ bool OrderBook::cancelOrder(int orderId) {
                     .timestamp = order.timestamp,
                     .isReservation = true,
                     .isCancellation = true
-                };
-                recentFills.push_back(cancelFill);
+                });
                 
                 // Remove the order
                 queue.erase(qIt);
@@ -99,13 +117,19 @@ std::vector<Fill> OrderBook::matchMarketOrder(const Order& marketOrder) {
         auto priceIt = (marketOrder.side == OrderSide::BUY) ? 
                       book.begin() : std::prev(book.end());
         auto& orderQueue = priceIt->second;
-
-        while (!orderQueue.empty() && remainingQty > 0) {
-            Order& passiveOrder = orderQueue.front();
+        
+        // Use an iterator to track our position in the queue
+        auto orderIt = orderQueue.begin();
+        
+        while (orderIt != orderQueue.end() && remainingQty > 0) {
+            Order& passiveOrder = *orderIt;
             
             // Skip self-trades but preserve the order for other agents
             if (passiveOrder.agentId == marketOrder.agentId) {
-                continue; 
+                // Using iterator to skip without modifying queue structure
+                // This preserves FIFO order priority while preventing self-trading
+                ++orderIt;
+                continue;
             }
 
             int fillQty = std::min(remainingQty, passiveOrder.quantity);
@@ -114,26 +138,24 @@ std::vector<Fill> OrderBook::matchMarketOrder(const Order& marketOrder) {
             lastTradePrice = passiveOrder.price;
 
             // Passive order fill (agent who placed the limit order)
-            Fill passiveFill{
+            recentFills.emplace_back(Fill{
                 .agentId = passiveOrder.agentId,
                 .price = passiveOrder.price,
                 .quantity = fillQty,
                 .side = passiveOrder.side,
                 .timestamp = marketOrder.timestamp,
                 .isReservation = false
-            };
-            recentFills.push_back(passiveFill);
+            });
 
             // Active order fill (agent who placed the market order)
-            Fill activeFill{
+            fills.emplace_back(Fill{
                 .agentId = marketOrder.agentId,
                 .price = passiveOrder.price,
                 .quantity = fillQty,
                 .side = marketOrder.side,
                 .timestamp = marketOrder.timestamp,
                 .isReservation = false
-            };
-            fills.push_back(activeFill);
+            });
 
             // Update quantities
             remainingQty -= fillQty;
@@ -142,15 +164,17 @@ std::vector<Fill> OrderBook::matchMarketOrder(const Order& marketOrder) {
             // Remove filled passive orders
             if (passiveOrder.quantity == 0) {
                 idLookup.erase(passiveOrder.id);
-                orderQueue.pop_front();
+                orderIt = orderQueue.erase(orderIt);
+            } else {
+                ++orderIt;
             }
         }
 
         // Remove empty price levels
         if (orderQueue.empty()) {
             book.erase(priceIt);
-        } else {
-            // No more liquidity at next best price to continue filling
+        } else if (remainingQty > 0) {
+            // No more matchable orders at this price level
             break;
         }
     }
