@@ -89,25 +89,25 @@ std::vector<Fill> OrderBook::matchMarketOrder(const Order& marketOrder) {
     std::vector<Fill> fills;
     if (marketOrder.quantity <= 0 || marketOrder.agentId < 0) return fills;
     
-    // Mark the agent as having taken action
     actionTakenByAgentId = marketOrder.agentId;
-
     int remainingQty = marketOrder.quantity;
     auto& book = (marketOrder.side == OrderSide::BUY) ? asks : bids;
 
-    if (book.empty()) {
-        return fills; // No matching orders available
-    }
+    if (book.empty()) return fills;
 
     while (remainingQty > 0 && !book.empty()) {
-        auto priceIt = (marketOrder.side == OrderSide::BUY)
-                           ? book.begin()                 // lowest ask for buy market orders
-                           : std::prev(book.end());       // highest bid for sell market orders
-
+        auto priceIt = (marketOrder.side == OrderSide::BUY) ? 
+                      book.begin() : std::prev(book.end());
         auto& orderQueue = priceIt->second;
 
         while (!orderQueue.empty() && remainingQty > 0) {
             Order& passiveOrder = orderQueue.front();
+            
+            // Skip self-trades but preserve the order for other agents
+            if (passiveOrder.agentId == marketOrder.agentId) {
+                continue; 
+            }
+
             int fillQty = std::min(remainingQty, passiveOrder.quantity);
 
             // Update last trade price
