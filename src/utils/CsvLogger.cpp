@@ -12,8 +12,8 @@ CsvLogger::CsvLogger(const std::string& filename) {
 
 void CsvLogger::log(int timestamp, const std::vector<std::shared_ptr<Agent>>& agents, double marketPrice) {
     for (const auto& agent : agents) {
-        double realized = agent->getRealizedPnL();
         double unrealized = agent->getUnrealizedPnL(marketPrice);
+        double realized = agent->getRealizedPnL();
         double total = realized + unrealized;
         out << timestamp << "," << agent->getId() << "," << agent->getCash() << "," << agent->getInventory()
             << "," << realized << "," << unrealized << "," << total << "\n";

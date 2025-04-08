@@ -8,11 +8,18 @@
 
 class MarketSimulator {
 public:
+    // Constructor requires the total simulation steps.
     MarketSimulator(int steps);
+    
+    // Add an agent to the simulation.
     void addAgent(std::shared_ptr<Agent> agent);
+    
+    // Run the full simulation.
     void run();
+    
+    // Execute one simulation step.
     void stepSimulation();
-
+    
 private:
     int timestamp;
     int maxSteps;

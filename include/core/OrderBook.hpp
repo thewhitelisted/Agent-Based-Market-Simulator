@@ -22,10 +22,21 @@ public:
     const std::vector<Fill>& getRecentFills() const;
     void clearFills();
     double getMidPrice() const;
+    double getLastTradePrice() const;
+    
+    // Action tracking methods
+    bool wasActionTakenByAgent(int agentId) const;
+    void clearAgentActionFlag();
+    
+    // Access methods for order books
+    const std::map<double, std::deque<Order>>& getAsks() const { return asks; }
+    const std::map<double, std::deque<Order>>& getBids() const { return bids; }
 
 private:
     std::map<double, std::deque<Order>> bids; // price -> orders (BUY)
     std::map<double, std::deque<Order>> asks; // price -> orders (SELL)
     std::map<int, Order> idLookup;
-    std::vector<Fill> recentFills; 
+    std::vector<Fill> recentFills;
+    double lastTradePrice;
+    int actionTakenByAgentId;
 };

@@ -1,13 +1,36 @@
 #include "core/OrderBook.hpp"
 #include <iostream>
+#include <iomanip>  // for setprecision
 
-OrderBook::OrderBook() {}
+OrderBook::OrderBook() 
+    : lastTradePrice(100.0),  // Initialize with a reasonable default
+      actionTakenByAgentId(-1) {}
 
 void OrderBook::addLimitOrder(const Order& order) {
-    idLookup[order.id] = order;
-
-    auto& book = (order.side == OrderSide::BUY) ? bids : asks;
-    book[order.price].push_back(order);
+    // Create a unique ID for the order
+    static int nextOrderId = 1;
+    Order orderWithId = order;
+    orderWithId.id = nextOrderId++;
+    
+    // Add order to the book
+    idLookup[orderWithId.id] = orderWithId;
+    auto& book = (orderWithId.side == OrderSide::BUY) ? bids : asks;
+    book[orderWithId.price].push_back(orderWithId);
+    
+    // Mark the agent as having taken action
+    actionTakenByAgentId = orderWithId.agentId;
+    
+    // Create a reservation fill for tracking purposes
+    Fill reservation{
+        .agentId = orderWithId.agentId,
+        .price = orderWithId.price,
+        .quantity = orderWithId.quantity,
+        .side = orderWithId.side,
+        .timestamp = orderWithId.timestamp,
+        .isReservation = true
+    };
+    
+    recentFills.push_back(reservation);
 }
 
 bool OrderBook::cancelOrder(int orderId) {
@@ -22,9 +45,28 @@ bool OrderBook::cancelOrder(int orderId) {
         auto& queue = priceIt->second;
         for (auto qIt = queue.begin(); qIt != queue.end(); ++qIt) {
             if (qIt->id == orderId) {
+                // Create reservation cancellation fill
+                Fill cancelFill{
+                    .agentId = order.agentId,
+                    .price = order.price,
+                    .quantity = order.quantity,
+                    .side = order.side,
+                    .timestamp = order.timestamp,
+                    .isReservation = true,
+                    .isCancellation = true
+                };
+                recentFills.push_back(cancelFill);
+                
+                // Remove the order
                 queue.erase(qIt);
                 idLookup.erase(orderId);
+                
+                // Clean up empty price levels
                 if (queue.empty()) book.erase(priceIt);
+                
+                // Mark the agent as having taken action
+                actionTakenByAgentId = order.agentId;
+                
                 return true;
             }
         }
@@ -35,55 +77,76 @@ bool OrderBook::cancelOrder(int orderId) {
 
 std::vector<Fill> OrderBook::matchMarketOrder(const Order& marketOrder) {
     std::vector<Fill> fills;
-    Order remaining = marketOrder;
+    if (marketOrder.quantity <= 0 || marketOrder.agentId < 0) return fills;
+    
+    // Mark the agent as having taken action
+    actionTakenByAgentId = marketOrder.agentId;
 
+    int remainingQty = marketOrder.quantity;
     auto& book = (marketOrder.side == OrderSide::BUY) ? asks : bids;
-    auto it = book.begin();
 
-    while (remaining.quantity > 0 && it != book.end()) {
-        auto& queue = it->second;
-        while (!queue.empty() && remaining.quantity > 0) {
-            Order& top = queue.front();
+    if (book.empty()) {
+        return fills; // No matching orders available
+    }
 
-            int fillQty = std::min(remaining.quantity, top.quantity);
-            remaining.quantity -= fillQty;
-            top.quantity -= fillQty;
+    while (remainingQty > 0 && !book.empty()) {
+        auto priceIt = (marketOrder.side == OrderSide::BUY)
+                           ? book.begin()                 // lowest ask for buy market orders
+                           : std::prev(book.end());       // highest bid for sell market orders
 
+        auto& orderQueue = priceIt->second;
+
+        while (!orderQueue.empty() && remainingQty > 0) {
+            Order& passiveOrder = orderQueue.front();
+            int fillQty = std::min(remainingQty, passiveOrder.quantity);
+
+            // Update last trade price
+            lastTradePrice = passiveOrder.price;
+
+            // Passive order fill (agent who placed the limit order)
             Fill passiveFill{
-                .agentId = top.agentId,
-                .price = top.price,
+                .agentId = passiveOrder.agentId,
+                .price = passiveOrder.price,
                 .quantity = fillQty,
-                .side = top.side,  // passive side
-                .timestamp = marketOrder.timestamp
+                .side = passiveOrder.side,
+                .timestamp = marketOrder.timestamp,
+                .isReservation = false
             };
             recentFills.push_back(passiveFill);
 
+            // Active order fill (agent who placed the market order)
             Fill activeFill{
                 .agentId = marketOrder.agentId,
-                .price = top.price,
+                .price = passiveOrder.price,
                 .quantity = fillQty,
-                .side = (marketOrder.side == OrderSide::BUY ? OrderSide::BUY : OrderSide::SELL),
-                .timestamp = marketOrder.timestamp
+                .side = marketOrder.side,
+                .timestamp = marketOrder.timestamp,
+                .isReservation = false
             };
-            fills.push_back(activeFill);          // returned to caller
-            recentFills.push_back(activeFill);    // also tracked centrally
+            fills.push_back(activeFill);
 
-            if (top.quantity == 0) {
-                idLookup.erase(top.id);
-                queue.pop_front();
+            // Update quantities
+            remainingQty -= fillQty;
+            passiveOrder.quantity -= fillQty;
+
+            // Remove filled passive orders
+            if (passiveOrder.quantity == 0) {
+                idLookup.erase(passiveOrder.id);
+                orderQueue.pop_front();
             }
         }
 
-        if (queue.empty()) {
-            it = book.erase(it);
+        // Remove empty price levels
+        if (orderQueue.empty()) {
+            book.erase(priceIt);
         } else {
-            ++it;
+            // No more liquidity at next best price to continue filling
+            break;
         }
     }
 
     return fills;
 }
-
 
 std::optional<double> OrderBook::bestBid() const {
     if (bids.empty()) return std::nullopt;
@@ -97,13 +160,37 @@ std::optional<double> OrderBook::bestAsk() const {
 
 void OrderBook::printBook() const {
     std::cout << "=== ORDER BOOK ===\n";
-    std::cout << "Asks:\n";
-    for (const auto& [price, queue] : asks) {
-        std::cout << "  " << price << " x " << queue.size() << "\n";
+    
+    // Print asks from highest to lowest
+    std::cout << "Asks (Sell Orders):\n";
+    if (asks.empty()) {
+        std::cout << "  [empty]\n";
+    } else {
+        for (auto it = asks.rbegin(); it != asks.rend(); ++it) {
+            int totalQty = 0;
+            for (const auto& order : it->second) {
+                totalQty += order.quantity;
+            }
+            std::cout << "  Price: " << std::fixed << std::setprecision(2) << it->first 
+                      << " | Qty: " << totalQty 
+                      << " | Orders: " << it->second.size() << "\n";
+        }
     }
-    std::cout << "Bids:\n";
-    for (auto it = bids.rbegin(); it != bids.rend(); ++it) {
-        std::cout << "  " << it->first << " x " << it->second.size() << "\n";
+    
+    // Print bids from highest to lowest
+    std::cout << "Bids (Buy Orders):\n";
+    if (bids.empty()) {
+        std::cout << "  [empty]\n";
+    } else {
+        for (auto it = bids.rbegin(); it != bids.rend(); ++it) {
+            int totalQty = 0;
+            for (const auto& order : it->second) {
+                totalQty += order.quantity;
+            }
+            std::cout << "  Price: " << std::fixed << std::setprecision(2) << it->first 
+                      << " | Qty: " << totalQty 
+                      << " | Orders: " << it->second.size() << "\n";
+        }
     }
 }
 
@@ -115,12 +202,34 @@ void OrderBook::clearFills() {
     recentFills.clear();
 }
 
-
 double OrderBook::getMidPrice() const {
-    if (asks.empty() || bids.empty()) return 0.0;
+    auto bid = bestBid();
+    auto ask = bestAsk();
+    
+    if (bid && ask) {
+        // If we have both sides, use the midpoint
+        return (bid.value() + ask.value()) / 2.0;
+    } else if (bid) {
+        // If we only have bids, use the highest bid
+        return bid.value();
+    } else if (ask) {
+        // If we only have asks, use the lowest ask
+        return ask.value();
+    } else {
+        // When no orders exist, use the last trade price
+        return lastTradePrice;
+    }
+}
 
-    double bestAsk = asks.begin()->first;
-    double bestBid = bids.rbegin()->first;
-    return (bestAsk + bestBid) / 2.0;
+double OrderBook::getLastTradePrice() const {
+    return lastTradePrice;
+}
+
+bool OrderBook::wasActionTakenByAgent(int agentId) const {
+    return actionTakenByAgentId == agentId;
+}
+
+void OrderBook::clearAgentActionFlag() {
+    actionTakenByAgentId = -1;
 }
 
