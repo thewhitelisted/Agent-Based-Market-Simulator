@@ -7,7 +7,17 @@ OrderBook::OrderBook()
       actionTakenByAgentId(-1) {}
 
 void OrderBook::addLimitOrder(const Order& order) {
-    // Create a unique ID for the order
+    // First check if order can be immediately matched
+    if (order.side == OrderSide::BUY && !asks.empty() && order.price >= asks.begin()->first) {
+        auto fills = matchMarketOrder(order);
+        if (fills.size() > 0) return; // Order was fully filled
+    }
+    else if (order.side == OrderSide::SELL && !bids.empty() && order.price <= bids.rbegin()->first) {
+        auto fills = matchMarketOrder(order);
+        if (fills.size() > 0) return; // Order was fully filled
+    }
+
+    // If we get here, either no matching or partial fill - add remaining to book
     static int nextOrderId = 1;
     Order orderWithId = order;
     orderWithId.id = nextOrderId++;
